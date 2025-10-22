@@ -1,0 +1,1203 @@
+{% extends "base.html" %}
+{% block title %}Traffic Dashboard{% endblock %}
+{% block content %}
+<section class="layout">
+  <div class="card layout__primary" id="overview-card">
+    <h2>Thông tin chung</h2>
+    {% if analysis.overview %}
+      <div class="stat-grid">
+        <div class="stat-card">
+          <span class="stat-label">Tổng số bản ghi</span>
+          <span class="stat-value">{{ "{:,}".format((analysis.overview.total_rows or 0)|int) }}</span>
+          <span class="stat-sub">Thư mục: <code>{{ output_dir }}</code></span>
+        </div>
+        <div class="stat-card alt">
+          <span class="stat-label">Tốc độ trung bình</span>
+          <span class="stat-value">{{ analysis.overview.avg_speed | default(0) | round(2) }} km/h</span>
+          <span class="stat-sub">Giai đoạn: {{ analysis.overview.start_time }} → {{ analysis.overview.end_time }}</span>
+        </div>
+        <div class="stat-card warning">
+          <span class="stat-label">Tỉ lệ cảnh báo tắc nghẽn</span>
+          <span class="stat-value">{{ ((analysis.overview.congestion_ratio or 0) * 100) | round(1) }}%</span>
+          <span class="stat-sub">Xác suất trung bình: {{ analysis.overview.avg_prob_congestion | default(0) | round(2) }}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Std tốc độ theo giờ (TB)</span>
+          <span class="stat-value">
+            {% if analysis.hourly_std_avg is not none %}
+              {{ analysis.hourly_std_avg | round(2) }}
+            {% else %}
+              N/A
+            {% endif %}
+          </span>
+          <span class="stat-sub">Bản ghi phân cụm: {{ analysis.cluster_total or "N/A" }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p style="color: var(--muted);">Chưa có dữ liệu phân tích. Hãy đồng bộ kết quả mới nhất.</p>
+    {% endif %}
+  </div>
+
+  <div class="card layout__secondary" id="pipeline-card">
+    <h2>Tình trạng pipeline</h2>
+    {% if metrics %}
+      {% set meta = metrics.metadata %}
+      {% set durations = metrics.durations %}
+      <div class="stat-grid">
+        <div class="stat-card">
+          <span class="stat-label">Lần chạy gần nhất</span>
+          <span class="stat-value" style="font-size:1rem;">{{ metrics.last_run_human or "Chưa có thông tin" }}</span>
+          <span class="stat-sub">Pipeline thủ công hoặc theo lịch</span>
+        </div>
+        <div class="stat-card alt">
+          <span class="stat-label">Tổng thời gian</span>
+          <span class="stat-value">{{ (durations.get('total') or 0) | round(1) }}s</span>
+          <span class="stat-sub">Optimize + Analytics: {{ ((durations.get('optimize_signals') or 0) + (durations.get('analytics') or 0)) | round(1) }}s</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Số cụm tối ưu</span>
+          <span class="stat-value">k={{ meta.get('best_k', '?') }}</span>
+          <span class="stat-sub">Silhouette cao nhất trong khoảng thử</span>
+        </div>
+      </div>
+      <table class="table-compact">
+        <thead>
+          <tr>
+            <th>Bước</th>
+            <th>Thời gian (s)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step, value in durations.items() if step != "total" %}
+            <tr>
+              <td>{{ step }}</td>
+              <td>{{ value | round(2) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p style="color: var(--muted);">Chưa ghi nhận metric. Hãy chạy pipeline hoặc kiểm tra file <code>metrics/pipeline_metrics.json</code>.</p>
+    {% endif %}
+  </div>
+  </div>
+</section>
+
+<section class="layout layout--single">
+  <div class="card">
+  <h2>Xu hướng theo thời gian</h2>
+  <div class="chart-grid">
+    <div class="chart-container">
+      <canvas id="chartHourly"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="chartWeekday"></canvas>
+    </div>
+  </div>
+  </div>
+</section>
+
+<section class="layout layout--single" id="analysis-speed-trends">
+  <div class="card">
+  <h2>Phân bố & Xu hướng tốc độ</h2>
+  <div class="chart-grid">
+    <div class="chart-container">
+      <canvas id="chartHistogram"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="chartDaily"></canvas>
+    </div>
+  </div>
+  </div>
+</section>
+
+<section class="layout layout--single" id="analysis-heatmap">
+  <div class="card">
+    <h2>Heatmap tốc độ (Giờ × Ngày trong tuần)</h2>
+    <div id="heatmap-table" class="heatmap-wrapper"></div>
+  </div>
+</section>
+
+<section class="layout layout--single" id="analysis-sensor">
+  <div class="card">
+  <h2>Hoạt động & So sánh cảm biến</h2>
+  <div class="chart-grid">
+    <div class="chart-container chart-container--tall">
+      <canvas id="chartSensorActivity"></canvas>
+    </div>
+    <div class="chart-container chart-container--tall">
+      <canvas id="chartTopSensor"></canvas>
+    </div>
+  </div>
+  </div>
+</section>
+
+<section class="layout layout--single" id="realtime-card">
+  <div class="card card-highlight">
+    <div class="card-header-icon">
+      <div class="card-header-text">
+        <h2>Dự báo thời gian thực</h2>
+        <p>Nhập số liệu cảm biến hiện tại để ước lượng xác suất tắc nghẽn trong 15 phút tới.</p>
+      </div>
+      <span class="card-icon">⚡</span>
+    </div>
+    <form id="realtime-form" class="form-grid" autocomplete="off">
+      <div class="form-group">
+        <label for="realtime-road">Chọn tuyến đường</label>
+        <select id="realtime-road" name="road_id">
+          <option value="">Chọn nhanh tuyến đường</option>
+          <option value="nguyen-thi-tu">280 Nguyễn Thị Tú → ĐH Công Thương</option>
+          <option value="an-suong-thu-duc">BX An Sương → Chợ đầu mối Thủ Đức</option>
+        </select>
+      </div>
+      <div class="form-group span-2">
+        <label for="realtime-location">Vị trí / Ghi chú</label>
+        <input type="text" id="realtime-location" name="location" placeholder="Vòng xoay Hàng Xanh">
+      </div>
+      <div class="form-group">
+        <label for="realtime-avg-speed">Tốc độ trung bình (km/h) *</label>
+        <input type="number" step="0.1" min="0" id="realtime-avg-speed" name="avg_speed" required>
+      </div>
+      <input type="hidden" id="realtime-std-speed" name="std_speed_hour" value="auto">
+      <div class="form-group">
+        <label for="realtime-hour">Giờ (0-23)</label>
+        <input type="number" min="0" max="23" id="realtime-hour" name="hour" placeholder="Tự động nếu bỏ trống">
+      </div>
+      <div class="form-group">
+        <label for="realtime-weekday">Thứ (1=CN)</label>
+        <select id="realtime-weekday" name="weekday">
+          <option value="">Tự động</option>
+          <option value="1">Chủ nhật</option>
+          <option value="2">Thứ hai</option>
+          <option value="3">Thứ ba</option>
+          <option value="4">Thứ tư</option>
+          <option value="5">Thứ năm</option>
+          <option value="6">Thứ sáu</option>
+          <option value="7">Thứ bảy</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="realtime-timestamp">Thời điểm quan sát</label>
+        <input type="datetime-local" id="realtime-timestamp" name="timestamp">
+      </div>
+      <div class="form-group">
+        <label for="realtime-lat">Vĩ độ (tùy chọn)</label>
+        <input type="number" step="0.000001" id="realtime-lat" name="latitude" placeholder="10.801900">
+      </div>
+      <div class="form-group">
+        <label for="realtime-lon">Kinh độ (tùy chọn)</label>
+        <input type="number" step="0.000001" id="realtime-lon" name="longitude" placeholder="106.712300">
+      </div>
+      <div class="form-group span-2 form-actions">
+        <button type="submit" id="realtime-submit" class="btn-primary">Dự báo ngay</button>
+        <button type="button" id="realtime-refresh" class="btn-icon" title="Cập nhật thời gian quan sát">
+          🔄
+        </button>
+      </div>
+    </form>
+    <div id="realtime-result" class="realtime-result">
+      <p style="color: var(--muted); margin: 0;">Nhập thông tin và nhấn “Dự báo ngay” để xem kết quả thời gian thực.</p>
+    </div>
+    <p style="color: var(--muted); font-size: 0.85rem; margin-top: 12px;">
+      📌 Hãy đảm bảo Spark có thể khởi chạy local. Đặt biến <code>SPARK_LOCAL_IP</code>, <code>SPARK_DRIVER_HOST</code>, <code>SPARK_MASTER</code> trước khi chạy <code>python3 webapp/app.py</code>.
+    </p>
+  </div>
+</section>
+
+<section class="layout layout--single" id="signal-plan">
+  <div class="card">
+    <div class="card-header-icon">
+      <div class="card-header-text">
+        <h2>Tối ưu chu kỳ đèn</h2>
+        <p>Dựa trên xác suất tắc nghẽn trung bình theo giờ, hệ thống đề xuất điều chỉnh pha xanh cho các nút giao chính.</p>
+      </div>
+      <span class="card-icon">🚦</span>
+    </div>
+    {% set signal_records = signal_plan.records or [] %}
+    {% if signal_records %}
+      <div class="stat-grid">
+        {% set top = signal_plan.top or [] %}
+        {% if top %}
+          {% set best = top[0] %}
+          <div class="stat-card warning">
+            <span class="stat-label">Rủi ro cao nhất</span>
+            <strong>{{ best.date }} · {{ "%02d"|format(best.hour or 0) }}h</strong>
+            <small style="color: var(--muted); font-size: 0.82rem;">
+              Xác suất {{ best.avg_prob_percent | default(0) }}% · {{ best.strategy or '—' }}
+            </small>
+          </div>
+        {% endif %}
+        <div class="stat-card">
+          <span class="stat-label">Số khuyến nghị</span>
+          <strong>{{ signal_records|length }}</strong>
+          <small style="color: var(--muted); font-size: 0.82rem;">
+            {% if signal_plan.last_updated_human %}
+              Cập nhật lúc {{ signal_plan.last_updated_human }}
+            {% else %}
+              Được tạo từ lô dự báo mới nhất
+            {% endif %}
+          </small>
+        </div>
+        {% if top and top|length > 1 %}
+          <div class="stat-card">
+            <span class="stat-label">Top 3 đề xuất</span>
+            <small style="color: var(--muted); font-size: 0.82rem;">
+              {% for item in top[:3] %}
+                {{ item.date }} {{ "%02d"|format(item.hour or 0) }}h ({{ item.avg_prob_percent|default(0) }}%)<br>
+              {% endfor %}
+            </small>
+          </div>
+        {% endif %}
+      </div>
+      <div class="table-scroll" style="margin-top: 18px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Ngày</th>
+              <th>Giờ</th>
+              <th>Xác suất</th>
+              <th>Tốc độ TB</th>
+              <th>Mẫu</th>
+              <th>Điều chỉnh</th>
+              <th>Chiến lược</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in signal_records[:30] %}
+              <tr>
+                <td>{{ row.date }}</td>
+                <td>{{ "%02d"|format(row.hour or 0) }}h</td>
+                <td>{{ row.avg_prob_percent | default(0) }}%</td>
+                <td>
+                  {% if row.avg_speed is not none %}
+                    {{ row.avg_speed }} km/h
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ row.count_samples | default(0) }}</td>
+                <td>
+                  {% if row.green_extension_pct is not none %}
+                    {{ row.green_extension_pct }}%
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ row.strategy or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p style="color: var(--muted); font-size: 0.82rem; margin-top: 12px;">
+        * Giá trị dương nghĩa là kéo dài pha xanh cho hướng đang đông; giá trị âm nghĩa là rút ngắn để ưu tiên hướng khác.
+      </p>
+    {% else %}
+      <p style="color: var(--muted); margin: 0;">Chưa có dữ liệu tối ưu chu kỳ đèn. Hãy chạy pipeline để tạo khuyến nghị mới.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="layout cluster-layout">
+  <div class="card" id="analysis-cluster">
+    <h2>Phân bố cụm KMeans</h2>
+    {% if analysis.cluster %}
+      <div class="cluster-grid">
+        {% for row in analysis.cluster %}
+          {% set percent = (row.row_count / (analysis.cluster_total or 1) * 100) if analysis.cluster_total else 0 %}
+          <div class="cluster-card">
+            <div class="cluster-card__header">
+              <span class="cluster-card__label">Cụm {{ row.prediction }}</span>
+              <span class="cluster-card__badge">{{ percent | round(1) }}%</span>
+            </div>
+            <div class="cluster-card__body">
+              {% set raw_label = row.cluster_label %}
+              {% if raw_label is none or raw_label|string|trim == '' or raw_label == 'N/A' %}
+                {% set display_label = 'Cụm ' ~ row.prediction %}
+              {% else %}
+                {% set display_label = raw_label %}
+              {% endif %}
+              <span class="cluster-card__title">{{ display_label }}</span>
+              <div class="cluster-card__stats">
+                <div><span>Tốc độ TB</span><strong>{{ row.avg_speed_mean | round(2) }} km/h</strong></div>
+                <div><span>Số bản ghi</span><strong>{{ "{:,}".format(row.row_count) }}</strong></div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>Chưa có thống kê cụm.</p>
+    {% endif %}
+  </div>
+
+  <div class="card" id="analysis-top-hour">
+    <h2>Top khung giờ có nguy cơ tắc nghẽn</h2>
+    {% if analysis.top %}
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Ngày</th>
+              <th>Giờ</th>
+              <th>Xác suất TB</th>
+              <th>Số mẫu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in analysis.top[:10] %}
+              <tr>
+                <td>{{ row.date }}</td>
+                <td>{{ row.hour }}</td>
+                <td>{{ row.avg_prob | round(3) }}</td>
+                <td>{{ "{:,}".format(row.count|int) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if analysis.top|length > 10 %}
+        <p style="color:var(--muted); font-size:0.85rem; margin-top:8px;">(Hiển thị 10 dòng có xác suất cao nhất)</p>
+      {% endif %}
+    {% else %}
+      <p>Chưa có dữ liệu về khung giờ tắc nghẽn.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="layout layout--single" id="logistic-section">
+  <div class="card card-highlight">
+    <div class="card-header-icon">
+      <div class="card-header-text">
+        <h2>Kết quả dự báo tắc nghẽn</h2>
+        <p>Chọn một lần chạy Logistic Regression để xem bảng xác suất và phân tích chi tiết.</p>
+      </div>
+      <span class="card-icon">📈</span>
+    </div>
+    {% if runs %}
+      <div class="prediction-grid">
+        {% for run in runs %}
+          {% set parts = run.split('_') %}
+          {% set suffix = parts[-1] %}
+          {% if suffix.endswith('m') %}
+            {% set horizon_label = suffix[:-1] ~ " phút" %}
+          {% elif suffix.endswith('h') %}
+            {% set horizon_label = suffix[:-1] ~ " giờ" %}
+          {% else %}
+            {% set horizon_label = suffix.replace('-', ' ') %}
+          {% endif %}
+          {% set display_title = "Dự báo " ~ horizon_label ~ " tới" %}
+          {% set source_hint = ("Thư mục: " ~ run) %}
+          <a class="prediction-card" href="{{ url_for('prediction_detail', run_name=run) }}">
+            <div>
+              <span class="prediction-pill">Logistic · {{ horizon_label }}</span>
+              <h3>{{ display_title }}</h3>
+              <p>{{ source_hint }}</p>
+            </div>
+            <span class="prediction-arrow">→</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>Chưa thấy thư mục <code>predict_*</code> nào. Hãy chạy pipeline trước.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if analysis.feature_importance %}
+<section class="layout layout--single">
+  <div class="card">
+    <h2>Độ quan trọng đặc trưng</h2>
+    <p style="color: var(--muted); margin-bottom: 16px;">Biểu đồ mô tả mức đóng góp tương đối của từng đặc trưng trong mô hình logistic hiện tại.</p>
+    <div class="chart-grid">
+      <div class="chart-container">
+        <canvas id="chartFeatureImportance"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<div class="card">
+  <h2>Biểu đồ KMeans</h2>
+  {% if plots %}
+    <div style="display:flex; flex-wrap:wrap; gap:16px;">
+      {% for plot in plots %}
+        <div style="flex:1 1 320px;">
+          <a href="{{ url_for('serve_plot', filename=plot) }}" target="_blank">
+            <img src="{{ url_for('serve_plot', filename=plot) }}" alt="{{ plot }}" style="width:100%; border-radius:12px; box-shadow:0 12px 24px rgba(56,189,248,0.25);" />
+          </a>
+          <p style="text-align:center; margin-top:8px;">{{ plot }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>Chưa có ảnh trong <code>plots_kmeans</code>.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const roads = [
+    {
+      id: 'nguyen-thi-tu',
+      name: '280 Nguyễn Thị Tú → Đại học Công Thương',
+      start: { lat: 10.8156988344, lon: 106.5865112907 },
+      end: { lat: 10.8066598944, lon: 106.6287395048 },
+      defaultSpeed: 30.0
+    },
+    {
+      id: 'an-suong-thu-duc',
+      name: 'Bến xe An Sương → Chợ đầu mối Thủ Đức',
+      start: { lat: 10.8455708823, lon: 106.6133657368 },
+      end: { lat: 10.8706316497, lon: 106.7289095028 },
+      defaultSpeed: 40.0
+    }
+  ];
+
+  const realtimeForm = document.getElementById('realtime-form');
+  const realtimeResult = document.getElementById('realtime-result');
+  const realtimeSubmit = document.getElementById('realtime-submit');
+  const realtimeRefresh = document.getElementById('realtime-refresh');
+  const roadSelect = document.getElementById('realtime-road');
+  const locationInput = document.getElementById('realtime-location');
+  const avgSpeedInput = document.getElementById('realtime-avg-speed');
+  const hourInput = document.getElementById('realtime-hour');
+  const weekdaySelect = document.getElementById('realtime-weekday');
+  const timestampInput = document.getElementById('realtime-timestamp');
+  const latInput = document.getElementById('realtime-lat');
+  const lonInput = document.getElementById('realtime-lon');
+  let locationAutoFilled = true;
+  let selectedRoad = null;
+
+  const pad = (num) => String(num).padStart(2, '0');
+
+  const setObservationTime = (force = false) => {
+    const now = new Date();
+    if (hourInput && (force || hourInput.value === '')) {
+      hourInput.value = String(now.getHours());
+    }
+    if (weekdaySelect && (force || !weekdaySelect.value)) {
+      const jsDay = now.getDay();
+      const sparkDay = jsDay === 0 ? 1 : jsDay + 1;
+      weekdaySelect.value = String(sparkDay);
+    }
+    if (timestampInput && (force || timestampInput.value === '')) {
+      timestampInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    }
+  };
+
+  const applyRoadSelection = (roadId) => {
+    if (!roadId) {
+      selectedRoad = null;
+      return;
+    }
+    const road = roads.find(r => r.id === roadId);
+    if (!road) {
+      selectedRoad = null;
+      return;
+    }
+    selectedRoad = road;
+
+    if (avgSpeedInput && !avgSpeedInput.value && road.defaultSpeed) {
+      avgSpeedInput.value = road.defaultSpeed;
+    }
+
+    if (locationInput && (locationAutoFilled || !locationInput.value)) {
+      locationInput.value = road.name;
+      locationAutoFilled = true;
+    }
+
+    if (latInput && (latInput.dataset.manual !== 'true' || latInput.value === '')) {
+      latInput.value = road.start.lat.toFixed(6);
+      latInput.dataset.manual = 'false';
+    }
+    if (lonInput && (lonInput.dataset.manual !== 'true' || lonInput.value === '')) {
+      lonInput.value = road.start.lon.toFixed(6);
+      lonInput.dataset.manual = 'false';
+    }
+  };
+
+  if (locationInput) {
+    locationInput.addEventListener('input', () => {
+      locationAutoFilled = locationInput.value.trim() === '';
+    });
+  }
+
+  if (latInput) {
+    latInput.addEventListener('input', () => {
+      latInput.dataset.manual = latInput.value.trim() !== '' ? 'true' : 'false';
+    });
+  }
+
+  if (lonInput) {
+    lonInput.addEventListener('input', () => {
+      lonInput.dataset.manual = lonInput.value.trim() !== '' ? 'true' : 'false';
+    });
+  }
+
+  if (roadSelect) {
+    roadSelect.addEventListener('change', (event) => {
+      applyRoadSelection(event.target.value);
+    });
+  }
+
+  const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+  const parseNullableNumber = (value) => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (value && typeof value.valueOf === 'function') {
+      const parsed = Number(value.valueOf());
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+  const toPercent = (value) => isFiniteNumber(value) ? `${(value * 100).toFixed(1)}%` : 'N/A';
+
+  const showRealtimeLoading = () => {
+    if (!realtimeResult) return;
+    realtimeResult.innerHTML = '';
+    const p = document.createElement('p');
+    p.style.color = 'var(--muted)';
+    p.style.margin = '0';
+    p.textContent = 'Đang tính toán dự báo...';
+    realtimeResult.appendChild(p);
+  };
+
+  const showRealtimeError = (message, details) => {
+    if (!realtimeResult) return;
+    realtimeResult.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'realtime-error';
+    p.textContent = message || 'Không thể dự báo.';
+    realtimeResult.appendChild(p);
+    if (Array.isArray(details) && details.length) {
+      const ul = document.createElement('ul');
+      ul.className = 'realtime-error';
+      ul.style.margin = '0 0 0 18px';
+      details.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        ul.appendChild(li);
+      });
+      realtimeResult.appendChild(ul);
+    } else if (details && typeof details === 'string') {
+      const detailP = document.createElement('p');
+      detailP.className = 'realtime-error';
+      detailP.style.fontSize = '0.85rem';
+      detailP.textContent = details;
+      realtimeResult.appendChild(detailP);
+    }
+  };
+
+  const createStatCard = (label, value, extra, variant) => {
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    if (variant) card.classList.add(variant);
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'stat-label';
+    labelSpan.textContent = label;
+    card.appendChild(labelSpan);
+    const valueStrong = document.createElement('strong');
+    valueStrong.textContent = value;
+    card.appendChild(valueStrong);
+    if (extra) {
+      const extraSmall = document.createElement('small');
+      extraSmall.style = 'color: var(--muted); font-size: 0.8rem;';
+      extraSmall.textContent = extra;
+      card.appendChild(extraSmall);
+    }
+    return card;
+  };
+
+  const showRealtimeSuccess = (data) => {
+    if (!realtimeResult) return;
+    realtimeResult.innerHTML = '';
+
+    const probValue = parseNullableNumber(data?.prob_congestion);
+    const probPercent = probValue !== null ? toPercent(probValue) : 'N/A';
+
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'realtime-result__status';
+    statusDiv.classList.add(data?.prediction === 1 ? 'realtime-result__status--risk' : 'realtime-result__status--ok');
+
+    const title = document.createElement('h3');
+    const locationLabel = data?.inputs?.location ? ` · ${data.inputs.location}` : '';
+    title.textContent = `${data?.prediction === 1 ? '⚠️ Nguy cơ tắc nghẽn' : '✅ Giao thông thông thoáng'}${locationLabel}`;
+    statusDiv.appendChild(title);
+
+    const probSpan = document.createElement('span');
+    probSpan.textContent = probPercent;
+    statusDiv.appendChild(probSpan);
+    realtimeResult.appendChild(statusDiv);
+
+    const statGrid = document.createElement('div');
+    statGrid.className = 'stat-grid';
+
+    const variant = data?.prediction === 1 ? 'warning' : 'alt';
+    statGrid.appendChild(createStatCard('Xác suất 15 phút tới', probPercent, null, variant));
+
+    const strategy = data?.strategy || {};
+    const adjustValue = parseNullableNumber(strategy.green_extension_pct);
+    const adjustText = adjustValue !== null
+      ? `Điều chỉnh: ${adjustValue > 0 ? '+' : ''}${adjustValue}%`
+      : 'Điều chỉnh: —';
+    statGrid.appendChild(createStatCard(
+      'Khuyến nghị đèn',
+      strategy.strategy || 'Không có dữ liệu',
+      adjustText
+    ));
+
+    const speedValue = parseNullableNumber(data?.inputs?.avg_speed);
+    const speedText = speedValue !== null ? `${speedValue.toFixed(1)} km/h` : '—';
+    const contextText = `Giờ ${data?.inputs?.hour ?? '—'} · Thứ ${data?.inputs?.weekday ?? '—'}`;
+    statGrid.appendChild(createStatCard('Thông tin quan sát', speedText, contextText));
+
+    const distribution = Array.isArray(data?.probability_distribution) ? data.probability_distribution : null;
+    if (distribution && distribution.length >= 2) {
+      const p0 = parseNullableNumber(distribution[0]);
+      const p1 = parseNullableNumber(distribution[1]);
+      const parts = [];
+      if (p0 !== null) parts.push(`Thoáng: ${toPercent(p0)}`);
+      if (p1 !== null) parts.push(`Tắc nghẽn: ${toPercent(p1)}`);
+      if (parts.length) {
+        statGrid.appendChild(createStatCard('Phân bố xác suất', parts.join(' · ')));
+      }
+    }
+
+    realtimeResult.appendChild(statGrid);
+
+    const footer = document.createElement('p');
+    footer.style.color = 'var(--muted)';
+    footer.style.fontSize = '0.8rem';
+    footer.style.margin = '0';
+    const observed = data?.inputs?.timestamp ? new Date(data.inputs.timestamp) : null;
+    const observedLabel = observed && !Number.isNaN(observed.getTime())
+      ? observed.toLocaleString('vi-VN', { hour12: false })
+      : 'N/A';
+    const modelLabel = data?.model?.path ? ` · Model: ${data.model.path}` : '';
+    footer.textContent = `Quan sát lúc ${observedLabel}${modelLabel}`;
+    realtimeResult.appendChild(footer);
+  };
+
+  const collectRealtimePayload = () => {
+    const payload = {};
+    if (!realtimeForm) {
+      return payload;
+    }
+    const formData = new FormData(realtimeForm);
+
+    const roadId = formData.get('road_id');
+    if (roadId) {
+      payload.road_id = roadId;
+    }
+
+    const avgSpeedRaw = formData.get('avg_speed');
+    if (avgSpeedRaw !== null && avgSpeedRaw !== '') {
+      const avgSpeed = Number(avgSpeedRaw);
+      if (!Number.isNaN(avgSpeed)) {
+        payload.avg_speed = avgSpeed;
+      }
+    }
+
+    const stdSpeedRaw = formData.get('std_speed_hour');
+    if (stdSpeedRaw === null || String(stdSpeedRaw).trim() === '') {
+      payload.std_speed_hour = 'auto';
+    } else {
+      payload.std_speed_hour = String(stdSpeedRaw).trim();
+    }
+
+    const hourRaw = formData.get('hour');
+    if (hourRaw !== null && hourRaw !== '') {
+      const hourValue = Number(hourRaw);
+      if (!Number.isNaN(hourValue)) {
+        payload.hour = hourValue;
+      }
+    }
+
+    const weekdayRaw = formData.get('weekday');
+    if (weekdayRaw !== null && weekdayRaw !== '') {
+      const weekdayValue = Number(weekdayRaw);
+      if (!Number.isNaN(weekdayValue)) {
+        payload.weekday = weekdayValue;
+      }
+    }
+
+    const timestampRaw = formData.get('timestamp');
+    if (timestampRaw !== null && timestampRaw !== '') {
+      payload.timestamp = timestampRaw;
+    }
+
+    const location = formData.get('location');
+    if (location !== null && location.trim() !== '') {
+      payload.location = location.trim();
+    }
+
+    const latRaw = formData.get('latitude');
+    if (latRaw !== null && latRaw !== '') {
+      const latValue = Number(latRaw);
+      if (!Number.isNaN(latValue)) {
+        payload.latitude = latValue;
+      }
+    }
+
+    const lonRaw = formData.get('longitude');
+    if (lonRaw !== null && lonRaw !== '') {
+      const lonValue = Number(lonRaw);
+      if (!Number.isNaN(lonValue)) {
+        payload.longitude = lonValue;
+      }
+    }
+
+    return payload;
+  };
+
+  const fillRealtimeDefaults = () => {
+    if (!realtimeForm) return;
+    setObservationTime(false);
+
+    if (roadSelect && !roadSelect.value) {
+      roadSelect.value = roads[0]?.id || '';
+      applyRoadSelection(roadSelect.value);
+    } else if (roadSelect && roadSelect.value) {
+      applyRoadSelection(roadSelect.value);
+    }
+  };
+
+  if (realtimeForm && realtimeResult && realtimeSubmit) {
+    fillRealtimeDefaults();
+    realtimeForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!realtimeForm.reportValidity()) {
+        return;
+      }
+      const payload = collectRealtimePayload();
+      const originalLabel = realtimeSubmit.textContent;
+      realtimeSubmit.disabled = true;
+      realtimeSubmit.textContent = 'Đang dự báo...';
+      if (realtimeRefresh) {
+        realtimeRefresh.disabled = true;
+      }
+      showRealtimeLoading();
+      try {
+        const response = await fetch('/api/realtime', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+        const text = await response.text();
+        let data = {};
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (err) {
+            console.error('Không thể parse JSON:', err);
+          }
+        }
+        if (!response.ok) {
+          const message = data?.error || `Yêu cầu thất bại (${response.status})`;
+          showRealtimeError(message, data?.details);
+          return;
+        }
+        showRealtimeSuccess(data);
+      } catch (err) {
+        console.error(err);
+        showRealtimeError('Không thể kết nối tới API realtime.', err?.message || String(err));
+      } finally {
+        realtimeSubmit.disabled = false;
+        realtimeSubmit.textContent = originalLabel;
+        if (realtimeRefresh) {
+          realtimeRefresh.disabled = false;
+        }
+      }
+    });
+  }
+
+  if (realtimeRefresh) {
+    realtimeRefresh.addEventListener('click', () => {
+      setObservationTime(true);
+    });
+  }
+
+  const hourlyData = {{ analysis.hourly | default([]) | tojson }};
+  const weekdayData = {{ analysis.weekday | default([]) | tojson }};
+  const featureImportance = {{ analysis.feature_importance | default([]) | tojson }};
+
+  const chartColors = {
+    line: 'rgba(56, 189, 248, 0.9)',
+    fill: 'rgba(56, 189, 248, 0.18)',
+    line2: 'rgba(244, 114, 182, 0.9)',
+    fill2: 'rgba(244, 114, 182, 0.18)'
+  };
+
+  if (hourlyData.length) {
+    const ctx = document.getElementById('chartHourly');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hourlyData.map(d => `${d.hour}h`),
+        datasets: [
+          {
+            label: 'Tốc độ trung bình (km/h)',
+            data: hourlyData.map(d => d.avg_speed),
+            borderColor: chartColors.line,
+            backgroundColor: chartColors.fill,
+            fill: true,
+            tension: 0.35,
+            borderWidth: 2
+          },
+          {
+            label: 'Xác suất tắc nghẽn',
+            data: hourlyData.map(d => d.avg_prob_congestion),
+            borderColor: chartColors.line2,
+            backgroundColor: chartColors.fill2,
+            fill: true,
+            tension: 0.35,
+            borderWidth: 2,
+            yAxisID: 'y1'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(148, 163, 184, 0.2)' }
+          },
+          y1: {
+            position: 'right',
+            beginAtZero: true,
+            grid: { drawOnChartArea: false }
+          },
+          x: {
+            grid: { color: 'rgba(148, 163, 184, 0.15)' }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#cbd5f5' }
+          }
+        }
+      }
+    });
+  }
+
+  if (weekdayData.length) {
+    const weekdayNames = ['N/A', 'Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'];
+    const ctx2 = document.getElementById('chartWeekday');
+    new Chart(ctx2, {
+      type: 'bar',
+      data: {
+        labels: weekdayData.map(d => weekdayNames[d.weekday] || d.weekday),
+        datasets: [
+          {
+            label: 'Xác suất tắc nghẽn',
+            data: weekdayData.map(d => d.avg_prob_congestion),
+            backgroundColor: 'rgba(248, 113, 113, 0.6)',
+            borderRadius: 8
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+          x: { grid: { display: false } }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  }
+
+  const histogramData = {{ analysis.histogram | default([]) | tojson }};
+  if (histogramData.length) {
+    const ctxHist = document.getElementById('chartHistogram');
+    const labels = histogramData.map(d => `${Math.round(d.bin_lower)} - ${Math.round(d.bin_upper)} km/h`);
+    const counts = histogramData.map(d => d.count);
+    new Chart(ctxHist, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Số lượng bản ghi',
+          data: counts,
+          backgroundColor: 'rgba(59, 130, 246, 0.6)',
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: { grid: { color: 'rgba(148, 163, 184, 0.15)' } },
+          y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.2)' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  } else {
+    const ctxHist = document.getElementById('chartHistogram');
+    if (ctxHist) {
+      ctxHist.replaceWith(Object.assign(document.createElement('p'), {
+        textContent: 'Chưa có dữ liệu histogram. Hãy chạy lại pipeline.',
+        style: 'color: var(--muted); text-align:center; margin-top:40px;'
+      }));
+    }
+  }
+
+  const dailyData = {{ analysis.daily | default([]) | tojson }};
+  if (dailyData.length) {
+    const ctxDaily = document.getElementById('chartDaily');
+    const labels = dailyData.map(d => d.date);
+    const speeds = dailyData.map(d => d.avg_speed);
+    new Chart(ctxDaily, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Tốc độ trung bình (km/h)',
+          data: speeds,
+          borderColor: 'rgba(16, 185, 129, 0.9)',
+          backgroundColor: 'rgba(16, 185, 129, 0.2)',
+          fill: true,
+          tension: 0.25,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { grid: { color: 'rgba(148, 163, 184, 0.2)' } }, x: { grid: { display: false } } },
+        plugins: { legend: { labels: { color: '#cbd5f5' } } }
+      }
+    });
+  } else {
+    const ctxDaily = document.getElementById('chartDaily');
+    if (ctxDaily) {
+      ctxDaily.replaceWith(Object.assign(document.createElement('p'), {
+        textContent: 'Chưa có dữ liệu xu hướng theo ngày.',
+        style: 'color: var(--muted); text-align:center; margin-top:40px;'
+      }));
+    }
+  }
+
+  const heatmapData = {{ analysis.heatmap | default([]) | tojson }};
+  if (heatmapData.length) {
+    const container = document.getElementById('heatmap-table');
+    const weekdayOrder = [2, 3, 4, 5, 6, 7, 1];
+    const weekdayNames = {
+      1: 'Chủ nhật',
+      2: 'Thứ hai',
+      3: 'Thứ ba',
+      4: 'Thứ tư',
+      5: 'Thứ năm',
+      6: 'Thứ sáu',
+      7: 'Thứ bảy'
+    };
+    const hours = [...new Set(heatmapData.map(d => d.hour))].sort((a, b) => a - b);
+    const values = heatmapData.map(d => d.avg_speed).filter(v => typeof v === 'number');
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const heatColor = (value) => {
+      if (typeof value !== 'number' || isNaN(value)) return 'transparent';
+      const ratio = maxVal === minVal ? 0.5 : (value - minVal) / (maxVal - minVal);
+      const hue = 120 - ratio * 120;
+      return `hsl(${hue}, 85%, 50%)`;
+    };
+    if (container) {
+      const table = document.createElement('table');
+      table.className = 'heatmap';
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      headerRow.appendChild(document.createElement('th'));
+      hours.forEach(hour => {
+        const th = document.createElement('th');
+        th.textContent = `${hour}h`;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      weekdayOrder.forEach(weekdayValue => {
+        const weekdayRow = document.createElement('tr');
+        const labelCell = document.createElement('th');
+        labelCell.textContent = weekdayNames[weekdayValue];
+        weekdayRow.appendChild(labelCell);
+        hours.forEach(hour => {
+          const cell = document.createElement('td');
+          const match = heatmapData.find(d => d.weekday === weekdayValue && d.hour === hour);
+          const value = match ? parseFloat(match.avg_speed) : null;
+          cell.textContent = value && !isNaN(value) ? value.toFixed(1) : '';
+          cell.style.background = heatColor(value);
+          cell.style.color = value && !isNaN(value) ? '#021122' : '#94a3b8';
+          weekdayRow.appendChild(cell);
+        });
+        tbody.appendChild(weekdayRow);
+      });
+      table.appendChild(tbody);
+      container.innerHTML = '';
+      container.appendChild(table);
+    }
+  }
+  else {
+    const container = document.getElementById('heatmap-table');
+    if (container) {
+      container.innerHTML = '<p style="color: var(--muted); text-align:center;">Chưa có dữ liệu heatmap.</p>';
+    }
+  }
+
+  const sensorActivity = {{ analysis.sensor_activity | default([]) | tojson }};
+  if (sensorActivity.length) {
+    const ctxSensor = document.getElementById('chartSensorActivity');
+    const topSensors = sensorActivity.sort((a, b) => b.count - a.count).slice(0, 12);
+    new Chart(ctxSensor, {
+      type: 'bar',
+      data: {
+        labels: topSensors.map(d => d.sensor),
+        datasets: [{
+          label: 'Số điểm dữ liệu',
+          data: topSensors.map(d => d.count),
+          backgroundColor: 'rgba(190, 242, 100, 0.65)',
+          borderRadius: 6
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        scales: {
+          x: { grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+          y: { grid: { display: false } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  } else {
+    const ctxSensor = document.getElementById('chartSensorActivity');
+    if (ctxSensor) {
+      ctxSensor.replaceWith(Object.assign(document.createElement('p'), {
+        textContent: 'Chưa có thống kê hoạt động cảm biến.',
+        style: 'color: var(--muted); text-align:center; margin-top:40px;'
+      }));
+    }
+  }
+
+  if (featureImportance.length) {
+    const ctxFI = document.getElementById('chartFeatureImportance');
+    if (ctxFI) {
+      const labels = featureImportance.map(d => d.feature || '—');
+      const importanceValues = featureImportance.map(d => (d.importance || 0) * 100);
+      const coeffValues = featureImportance.map(d => d.coefficient || 0);
+      new Chart(ctxFI, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Độ quan trọng (%)',
+            data: importanceValues,
+            backgroundColor: 'rgba(37, 99, 235, 0.68)',
+            borderRadius: 10,
+            maxBarThickness: 28
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          scales: {
+            x: {
+              beginAtZero: true,
+              grid: { color: 'rgba(148, 163, 184, 0.18)' },
+              ticks: {
+                callback: value => `${value}%`,
+                color: '#e2e8f0'
+              }
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#e2e8f0' }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  const idx = ctx.dataIndex;
+                  const pct = (importanceValues[idx] || 0).toFixed(1);
+                  const coef = (coeffValues[idx] || 0).toFixed(3);
+                  return [`Độ quan trọng: ${pct}%`, `Hệ số: ${coef}`];
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+  } else {
+    const ctxFI = document.getElementById('chartFeatureImportance');
+    if (ctxFI) {
+      ctxFI.replaceWith(Object.assign(document.createElement('p'), {
+        textContent: 'Chưa có dữ liệu về độ quan trọng đặc trưng.',
+        style: 'color: var(--muted); text-align:center; margin-top:40px;'
+      }));
+    }
+  }
+
+  const topSensorHourly = {{ analysis.top_sensor_hourly | default([]) | tojson }};
+  if (topSensorHourly.length) {
+    const ctxTopSensor = document.getElementById('chartTopSensor');
+    const sensors = [...new Set(topSensorHourly.map(d => d.sensor))];
+    const hours = [...new Set(topSensorHourly.map(d => d.hour))].sort((a, b) => a - b);
+    const palette = ['#38bdf8', '#f472b6', '#facc15', '#22c55e', '#a855f7'];
+    const datasets = sensors.map((sensor, idx) => {
+      const values = hours.map(hour => {
+        const entry = topSensorHourly.find(d => d.sensor === sensor && d.hour === hour);
+        return entry ? entry.avg_speed : null;
+      });
+      return {
+        label: sensor,
+        data: values,
+        borderColor: palette[idx % palette.length],
+        backgroundColor: palette[idx % palette.length],
+        tension: 0.3,
+        fill: false,
+        spanGaps: true,
+        borderWidth: 2
+      };
+    });
+    new Chart(ctxTopSensor, {
+      type: 'line',
+      data: {
+        labels: hours.map(h => `${h}h`),
+        datasets
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+          x: { grid: { color: 'rgba(148, 163, 184, 0.15)' } }
+        },
+        plugins: { legend: { labels: { color: '#cbd5f5' } } }
+      }
+    });
+  } else {
+    const ctxTopSensor = document.getElementById('chartTopSensor');
+    if (ctxTopSensor) {
+      ctxTopSensor.replaceWith(Object.assign(document.createElement('p'), {
+        textContent: 'Chưa có dữ liệu so sánh cảm biến.',
+        style: 'color: var(--muted); text-align:center; margin-top:40px;'
+      }));
+    }
+  }
+</script>
+{% endblock %}

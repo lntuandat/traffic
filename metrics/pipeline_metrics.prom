@@ -1,0 +1,9 @@
+traffic_pipeline_last_run_timestamp_seconds 1761119315
+traffic_pipeline_total_duration_seconds 744.29
+traffic_step_duration_seconds{step="read_and_clean"} 122.05
+traffic_step_duration_seconds{step="kmeans"} 71.91
+traffic_step_duration_seconds{step="prediction"} 466.74
+traffic_step_duration_seconds{step="plot_local"} 4.20
+traffic_step_duration_seconds{step="optimize_signals"} 17.26
+traffic_step_duration_seconds{step="analytics"} 62.13
+traffic_step_duration_seconds{step="total"} 744.29

@@ -1,0 +1,1 @@
+{"class":"org.apache.spark.ml.feature.VectorAssembler","timestamp":1761119217277,"sparkVersion":"3.5.1","uid":"VectorAssembler_88be73e2d913","paramMap":{"outputCol":"features_raw","inputCols":["avg_speed","hour","weekday","std_speed_hour"]},"defaultParamMap":{"handleInvalid":"error","outputCol":"VectorAssembler_88be73e2d913__output"}}

@@ -1,0 +1,18 @@
+{
+  "timestamp": 1761119315,
+  "durations": {
+    "read_and_clean": 122.0470552444458,
+    "kmeans": 71.90563607215881,
+    "prediction": 466.7446804046631,
+    "plot_local": 4.2044055461883545,
+    "optimize_signals": 17.26103377342224,
+    "analytics": 62.12932825088501,
+    "total": 744.2923073768616
+  },
+  "metadata": {
+    "horizon_min": 15,
+    "freq_min": 5,
+    "best_k": 3,
+    "output": "hdfs://localhost:9000/results/metr_la"
+  }
+}

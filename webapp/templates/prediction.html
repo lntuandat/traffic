@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Chi tiết {{ run_name }}{% endblock %}
+{% block content %}
+{% set run_parts = run_name.split('_') %}
+{% set run_suffix = run_parts[-1] if run_parts else run_name %}
+{% if run_suffix.endswith('m') %}
+  {% set horizon_label = run_suffix[:-1] ~ " phút" %}
+{% elif run_suffix.endswith('h') %}
+  {% set horizon_label = run_suffix[:-1] ~ " giờ" %}
+{% else %}
+  {% set horizon_label = run_suffix.replace('-', ' ') %}
+{% endif %}
+{% set total_rows = (summary.total_rows or 0)|int %}
+{% set positive_cases = summary.positive_cases %}
+{% if total_rows and positive_cases is not none %}
+  {% set positive_ratio = (positive_cases / total_rows * 100) %}
+{% else %}
+  {% set positive_ratio = none %}
+{% endif %}
+{% set column_count = columns|length %}
+<section class="card detail-card detail-card--hero">
+  <div class="detail-card__top">
+    <a class="back-link" href="{{ url_for('index') }}">← Quay lại tổng quan</a>
+    <span class="detail-chip accent">Logistic Regression</span>
+  </div>
+  <div class="detail-card__body detail-card__body--hero">
+    <div class="detail-card__intro">
+      <h2>Chi tiết dự báo {{ horizon_label }}</h2>
+      <p class="detail-card__subtitle">
+        Theo dõi kết quả mô hình logistic để ước tính nguy cơ tắc nghẽn trong {{ horizon_label }} tới. Các chỉ số bên dưới giúp bạn đánh giá nhanh mức độ tin cậy của dự báo.
+      </p>
+      <div class="detail-chip-row">
+        <span class="detail-chip">Thư mục nguồn: {{ run_name }}</span>
+        <span class="detail-chip">Tổng bản ghi: {{ "{:,}".format(total_rows) }}</span>
+        {% if positive_cases is not none %}
+          <span class="detail-chip">Cảnh báo tắc nghẽn: {{ "{:,}".format(positive_cases|int) }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="detail-card__stats">
+      <div class="detail-stat">
+        <span class="detail-stat__label">Tổng bản ghi</span>
+        <span class="detail-stat__value">{{ "{:,}".format(total_rows) }}</span>
+        <span class="detail-stat__hint">Sau làm sạch & tạo đặc trưng</span>
+      </div>
+      <div class="detail-stat">
+        <span class="detail-stat__label">Cảnh báo</span>
+        <span class="detail-stat__value">
+          {% if positive_cases is not none %}
+            {{ "{:,}".format(positive_cases|int) }}
+          {% else %}
+            N/A
+          {% endif %}
+        </span>
+        <span class="detail-stat__hint">Số lần dự báo tắc nghẽn</span>
+      </div>
+      <div class="detail-stat">
+        <span class="detail-stat__label">Tỉ lệ cảnh báo</span>
+        {% set overall_ratio = summary.get('congestion_ratio') %}
+        <span class="detail-stat__value">
+          {% if positive_ratio is not none %}
+            {{ positive_ratio | round(1) }}%
+          {% elif overall_ratio is not none %}
+            {{ (overall_ratio * 100) | round(1) }}%
+          {% else %}
+            —
+          {% endif %}
+        </span>
+        <span class="detail-stat__hint">Trên tổng số bản ghi</span>
+      </div>
+      <div class="detail-stat">
+        <span class="detail-stat__label">Số trường</span>
+        <span class="detail-stat__value">{{ column_count }}</span>
+        <span class="detail-stat__hint">Trong bảng dữ liệu mẫu</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="detail-grid">
+  <section class="card panel-card">
+    <div class="panel-card__header">
+      <h3>Tổng quan dữ liệu</h3>
+      <span class="panel-tag">Dataset</span>
+    </div>
+    <div class="metric-grid metric-grid--tight">
+      <div class="metric-card">
+        <span class="metric-card__label">Tổng bản ghi</span>
+        <span class="metric-card__value">{{ "{:,}".format(total_rows) }}</span>
+        <span class="metric-card__hint">Đơn vị: dòng dữ liệu</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-card__label">Tốc độ trung bình</span>
+        <span class="metric-card__value">
+          {% if summary.avg_speed %}
+            {{ summary.avg_speed | round(1) }} km/h
+          {% else %}
+            —
+          {% endif %}
+        </span>
+        <span class="metric-card__hint">Giá trị trung bình toàn tập</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-card__label">Thời gian quan sát</span>
+        <span class="metric-card__value">
+          {% if summary.start_time and summary.end_time %}
+            {{ summary.start_time }} → {{ summary.end_time }}
+          {% else %}
+            —
+          {% endif %}
+        </span>
+        <span class="metric-card__hint">Khoảng dữ liệu đã dự báo</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-card__label">Tỉ lệ tắc nghẽn TB</span>
+        <span class="metric-card__value">
+          {% if overall_ratio is not none %}
+            {{ (overall_ratio * 100) | round(1) }}%
+          {% else %}
+            —
+          {% endif %}
+        </span>
+        <span class="metric-card__hint">Mean của xác suất tắc nghẽn</span>
+      </div>
+    </div>
+    {% set example_cols = columns[:5] %}
+    <div class="info-list">
+      <h4>Các trường nổi bật</h4>
+      <ul>
+        {% for col in example_cols %}
+          <li><code>{{ col }}</code></li>
+        {% endfor %}
+        {% if column_count > example_cols|length %}
+          <li>… và {{ column_count - example_cols|length }} trường khác</li>
+        {% endif %}
+      </ul>
+    </div>
+  </section>
+
+  {% if metrics %}
+  <section class="card panel-card">
+    <div class="panel-card__header">
+      <h3>Đánh giá mô hình</h3>
+      <span class="panel-tag panel-tag--model">Model</span>
+    </div>
+    <div class="metric-grid metric-grid--compact">
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">Accuracy</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["accuracy"]) }}</span>
+        <span class="metric-card__hint">Tổng thể chính xác</span>
+      </div>
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">Precision</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["precision"]) }}</span>
+        <span class="metric-card__hint">Giảm báo động giả</span>
+      </div>
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">Recall</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["recall"]) }}</span>
+        <span class="metric-card__hint">Bắt tín hiệu tắc nghẽn</span>
+      </div>
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">F1-score</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["f1"]) }}</span>
+        <span class="metric-card__hint">Cân bằng Precision/Recall</span>
+      </div>
+      {% if metrics.get("roc_auc") is not none %}
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">AUC-ROC</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["roc_auc"]) }}</span>
+        <span class="metric-card__hint">Khả năng phân tách hai lớp</span>
+      </div>
+      {% endif %}
+      {% if metrics.get("auprc") is not none %}
+      <div class="metric-card metric-card--compact">
+        <span class="metric-card__label">AUPRC</span>
+        <span class="metric-card__value">{{ "%.3f"|format(metrics["auprc"]) }}</span>
+        <span class="metric-card__hint">Tập trung vào lớp hiếm</span>
+      </div>
+      {% endif %}
+    </div>
+    {% if metrics.get("confusion") %}
+      <div class="confusion-wrapper">
+        <h4>Ma trận nhầm lẫn</h4>
+        <p class="section-note">Giá trị label 1 tương ứng với trạng thái tắc nghẽn.</p>
+        <table class="confusion">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Dự báo 0</th>
+              <th>Dự báo 1</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th>Thực 0</th>
+              <td>{{ metrics["confusion"]["tn"] }}</td>
+              <td>{{ metrics["confusion"]["fp"] }}</td>
+            </tr>
+            <tr>
+              <th>Thực 1</th>
+              <td>{{ metrics["confusion"]["fn"] }}</td>
+              <td>{{ metrics["confusion"]["tp"] }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+
+<div class="detail-grid">
+  {% if chart %}
+  <section class="card panel-card">
+    <div class="panel-card__header">
+      <h3>Biến động xác suất tắc nghẽn</h3>
+      <span class="panel-tag panel-tag--chart">Biểu đồ</span>
+    </div>
+    <p class="section-note">Bao gồm 200 điểm gần nhất; giá trị càng cao càng thể hiện nguy cơ tắc nghẽn trong {{ horizon_label }} tới.</p>
+    <div class="chart-container chart-container--tall">
+      <canvas id="chartDetail"></canvas>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="card panel-card">
+    <div class="panel-card__header">
+      <h3>Mẫu dữ liệu gần nhất</h3>
+      <span class="panel-tag panel-tag--table">Data</span>
+    </div>
+    <p class="section-note">
+      Hiển thị {{ records|length }} dòng cuối cùng kèm các trường quan sát để kiểm tra nhanh kết quả dự báo.
+    </p>
+    {% if records %}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            {% for col in columns %}
+              <th>{{ col }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in records %}
+            <tr>
+              {% for col in columns %}
+                <td>{{ row[col] }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p>Không có bản ghi nào trong dự báo này.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if chart %}
+<script>
+  const detailData = {{ chart | tojson }};
+  if (detailData.length) {
+    const ctx = document.getElementById('chartDetail');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: detailData.map(d => d.timestamp),
+        datasets: [{
+          label: 'Prob. tắc nghẽn',
+          data: detailData.map(d => d.prob),
+          borderColor: 'rgba(248, 113, 113, 0.9)',
+          backgroundColor: 'rgba(248, 113, 113, 0.18)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.35
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+          x: { ticks: { maxRotation: 60, minRotation: 45 }, grid: { display: false } }
+        },
+        plugins: { legend: { labels: { color: '#cbd5f5' } } }
+      }
+    });
+  }
+</script>
+{% endif %}
+{% endblock %}
