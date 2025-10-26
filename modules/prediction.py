@@ -5,8 +5,9 @@ from pyspark.ml.classification import LogisticRegression
 from pyspark.ml import Pipeline
 from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from modules.visualize import plot_eval_metrics
 
-def run_prediction(df_with_clusters, out_base, horizon_min=15, freq_min=5):
+def run_prediction(df_with_clusters, out_base, horizon_min=15, freq_min=5, plots_local=None):
     cleanup_cols = [c for c in ["features", "features_raw", "probability", "prediction_lr", "probability_lr"] if c in df_with_clusters.columns]
     if cleanup_cols:
         df_with_clusters = df_with_clusters.drop(*cleanup_cols)
@@ -144,6 +145,7 @@ def run_prediction(df_with_clusters, out_base, horizon_min=15, freq_min=5):
     print(f"💡 F1-score : {f1:.4f}")
 
     pred_test.groupBy("label", "prediction_lr").count().orderBy("label", "prediction_lr").show()
+    plot_eval_metrics(pred_test, plots_local, horizon_min, auc)
 
     pred_full = (
         pred_full

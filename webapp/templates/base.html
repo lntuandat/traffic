@@ -229,6 +229,32 @@
         gap: 16px 20px;
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       }
+      .metrics-gallery {
+        display: grid;
+        gap: 16px;
+        margin-top: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .metrics-figure {
+        margin: 0;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 14px;
+        padding: 16px;
+        text-align: center;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.35);
+      }
+      .metrics-figure img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      .metrics-figure figcaption {
+        margin-top: 10px;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
       .form-group {
         display: flex;
         flex-direction: column;

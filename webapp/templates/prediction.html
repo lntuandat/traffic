@@ -211,6 +211,24 @@
 </div>
 
 <div class="detail-grid">
+  {% if eval_assets %}
+  <section class="card panel-card">
+    <div class="panel-card__header">
+      <h3>Biểu đồ đánh giá mô hình</h3>
+      <span class="panel-tag panel-tag--chart">ROC & Confusion</span>
+    </div>
+    <p class="section-note">Đường cong ROC và ma trận nhầm lẫn giúp kiểm tra khả năng phân loại hai lớp của mô hình.</p>
+    <div class="metrics-gallery">
+      {% for asset in eval_assets %}
+        <figure class="metrics-figure">
+          <img src="{{ url_for('serve_metric', filename=asset.filename) }}" alt="{{ asset.title }}" loading="lazy">
+          <figcaption>{{ asset.title }}</figcaption>
+        </figure>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% if chart %}
   <section class="card panel-card">
     <div class="panel-card__header">

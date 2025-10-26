@@ -101,6 +101,48 @@ def list_prediction_runs():
         ]
     )
 
+def _infer_horizon_token(run_name: str) -> Optional[str]:
+    if not run_name:
+        return None
+    parts = run_name.split("_")
+    if not parts:
+        return None
+    suffix = parts[-1]
+    suffix = suffix.strip().lower()
+    if not suffix:
+        return None
+    if suffix.endswith(("m", "h")):
+        core = suffix[:-1]
+        if core.isdigit():
+            return f"{int(core)}{suffix[-1]}"
+        return suffix
+    if suffix.isdigit():
+        return f"{int(suffix)}m"
+    return None
+
+def find_evaluation_assets(run_name: str):
+    metrics_dir = OUTPUT_DIR / "metrics"
+    if not metrics_dir.exists():
+        return []
+
+    horizon = _infer_horizon_token(run_name)
+    candidates = []
+    if horizon:
+        candidates.append(f"roc_confusion_{horizon}.png")
+    candidates.append("roc_confusion.png")
+
+    assets = []
+    for name in candidates:
+        candidate_path = metrics_dir / name
+        if candidate_path.exists():
+            assets.append(
+                {
+                    "title": "Đường cong ROC & Ma trận nhầm lẫn",
+                    "filename": name,
+                }
+            )
+    return assets
+
 
 def read_prediction(run_name, limit=500):
     run_dir = OUTPUT_DIR / run_name
@@ -642,6 +684,7 @@ def prediction_detail(run_name):
     summary, metrics, sample, chart = read_prediction(run_name)
     columns = list(sample.columns)
     records = sample.to_dict(orient="records")
+    eval_assets = find_evaluation_assets(run_name)
     return render_template(
         "prediction.html",
         run_name=run_name,
@@ -650,6 +693,7 @@ def prediction_detail(run_name):
         columns=columns,
         records=records,
         chart=chart,
+        eval_assets=eval_assets,
     )
 
 
@@ -659,6 +703,13 @@ def serve_plot(filename):
     if not plots_dir.exists():
         abort(404)
     return send_from_directory(plots_dir, filename)
+
+@app.route("/metrics/<path:filename>")
+def serve_metric(filename):
+    metrics_dir = OUTPUT_DIR / "metrics"
+    if not metrics_dir.exists():
+        abort(404)
+    return send_from_directory(metrics_dir, filename)
 
 @app.route("/api/realtime", methods=["POST"])
 def api_realtime():

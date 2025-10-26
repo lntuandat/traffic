@@ -30,7 +30,7 @@ def main():
 
     print("⏳ (3/5) Huấn luyện Logistic Regression dự báo tắc nghẽn...")
     t = time.time()
-    pred_next = run_prediction(preds, args.out, args.horizon_min, args.freq_min)
+    pred_next = run_prediction(preds, args.out, args.horizon_min, args.freq_min, args.plots_local)
     durations["prediction"] = time.time() - t
     print(f"✅ Hoàn tất bước 3 sau {durations['prediction']:.1f}s\n")
 

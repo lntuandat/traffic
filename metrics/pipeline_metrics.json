@@ -1,13 +1,13 @@
 {
-  "timestamp": 1761119315,
+  "timestamp": 1761397802,
   "durations": {
-    "read_and_clean": 122.0470552444458,
-    "kmeans": 71.90563607215881,
-    "prediction": 466.7446804046631,
-    "plot_local": 4.2044055461883545,
-    "optimize_signals": 17.26103377342224,
-    "analytics": 62.12932825088501,
-    "total": 744.2923073768616
+    "read_and_clean": 95.11391615867615,
+    "kmeans": 58.84155225753784,
+    "prediction": 391.8780860900879,
+    "plot_local": 3.398094654083252,
+    "optimize_signals": 14.224878311157227,
+    "analytics": 49.682873249053955,
+    "total": 613.1396026611328
   },
   "metadata": {
     "horizon_min": 15,

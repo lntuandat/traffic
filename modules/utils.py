@@ -30,10 +30,10 @@ def start_spark():
         .config("spark.executor.memory", "4g")
         .config("spark.driver.bindAddress", os.environ.get("SPARK_DRIVER_BIND_ADDRESS", "127.0.0.1"))
         .config("spark.driver.host", os.environ.get("SPARK_DRIVER_HOST", "127.0.0.1"))
-        .config("spark.ui.enabled", "false")
-        .getOrCreate()
-    )
-    spark.sparkContext.setLogLevel("WARN")
+    .getOrCreate()
+)
+    log_level = os.environ.get("SPARK_LOG_LEVEL", "INFO").upper()
+    spark.sparkContext.setLogLevel(log_level)
     return spark
 
 def write_pipeline_metrics(durations, metadata=None, path=None):

@@ -1,4 +1,0 @@
-{"feature":"avg_speed","coefficient":-5.250931751113657,"importance":0.8927135917033484}
-{"feature":"hour","coefficient":0.5153755252903305,"importance":0.0876192565558204}
-{"feature":"weekday","coefficient":0.08436116202529612,"importance":0.014342284288097598}
-{"feature":"std_speed_hour","coefficient":0.03132081312291999,"importance":0.0053248674527337355}
